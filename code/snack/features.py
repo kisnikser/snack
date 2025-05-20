@@ -1,10 +1,18 @@
 import torch
+from functools import lru_cache
 
 
 # Признаковое пространство для аминокислот
 class FeatureSpace:
-    def __init__(self):
+    def __init__(self, device=None):
         self.feature_dim = 5
+        self.device = device  # Device can be specified during initialization or auto-detected later
+        self._feature_cache = (
+            {}
+        )  # Cache for feature vectors to avoid redundant computation
+
+        # Standard amino acids list
+        self.amino_acids = "ACDEFGHIKLMNPQRSTVWY-"
 
         # Гидрофобность по шкале Kyte-Doolittle
         self.hydropathy_index = {
@@ -28,6 +36,7 @@ class FeatureSpace:
             "V": 4.2,
             "W": -0.9,
             "Y": -1.3,
+            "-": 0.0,  # Gap character
         }
 
         # Молекулярная масса
@@ -52,6 +61,7 @@ class FeatureSpace:
             "V": 117.15,
             "W": 204.23,
             "Y": 181.19,
+            "-": 0.0,  # Gap character
         }
 
         # Полярность аминокислот
@@ -76,6 +86,7 @@ class FeatureSpace:
             "V": -1,
             "W": -1,
             "Y": 0,
+            "-": 0,  # Gap character
         }
 
         # Заряд при pH=7
@@ -100,6 +111,7 @@ class FeatureSpace:
             "V": 0,
             "W": 0,
             "Y": 0,
+            "-": 0,  # Gap character
         }
 
         # Объем аминокислот
@@ -124,18 +136,70 @@ class FeatureSpace:
             "V": 141,
             "W": 220,
             "Y": 193,
+            "-": 0,  # Gap character
         }
 
-    def get_features(self, amino_acid):
-        """Возвращаем расширенные признаки для аминокислоты"""
+        # Pre-compute all features for known amino acids for faster access
+        self._precompute_features()
+
+    def _precompute_features(self):
+        """Pre-compute feature vectors for all standard amino acids"""
+        for aa in self.amino_acids:
+            self._compute_features(aa)
+
+    def to(self, device):
+        """Move the feature vectors to the specified device"""
+        self.device = device
+        # Clear and rebuild the cache on the new device
+        self._feature_cache = {}
+        self._precompute_features()
+        return self
+
+    @lru_cache(maxsize=256)
+    def _compute_features(self, amino_acid):
+        """Compute the feature vector for an amino acid (without caching)"""
         hydropathy = self.hydropathy_index.get(amino_acid, 0.0)
         molecular_weight = self.molecular_weight.get(amino_acid, 0.0)
         polarity = self.polarity.get(amino_acid, 0.0)
         charge = self.charge_at_pH_7.get(amino_acid, 0.0)
         volume = self.volume.get(amino_acid, 0.0)
 
-        # Вектор признаков: гидрофобность, масса, полярность, заряд, гидрофильность, объем
-        return torch.tensor(
+        # Standardize features
+        molecular_weight = (
+            molecular_weight / 200.0
+        )  # Normalize to approximately [0, 1] range
+        volume = volume / 220.0  # Normalize to approximately [0, 1] range
+
+        # Create the feature vector
+        features = torch.tensor(
             [hydropathy, molecular_weight, polarity, charge, volume],
             dtype=torch.float,
         )
+
+        # Move to the appropriate device if specified
+        if self.device is not None:
+            features = features.to(self.device)
+
+        return features
+
+    def get_features(self, amino_acid):
+        """Return the feature vector for an amino acid, with caching for performance"""
+        # If amino_acid is already a tensor, return it
+        if isinstance(amino_acid, torch.Tensor):
+            return amino_acid
+
+        # Handle integer indices by converting to amino acid characters
+        if isinstance(amino_acid, int) and 0 <= amino_acid < len(self.amino_acids):
+            amino_acid = self.amino_acids[amino_acid]
+
+        # Ensure amino_acid is a string at this point
+        if not isinstance(amino_acid, str):
+            # Create a default zero vector for unknown inputs
+            zero_vec = torch.zeros(self.feature_dim, dtype=torch.float)
+            return zero_vec.to(self.device) if self.device else zero_vec
+
+        # Check if we've already computed this feature vector
+        if amino_acid not in self._feature_cache:
+            self._feature_cache[amino_acid] = self._compute_features(amino_acid)
+
+        return self._feature_cache[amino_acid]

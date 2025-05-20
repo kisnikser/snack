@@ -1,0 +1,20 @@
+[project]
+name = "snack"
+version = "0.1.0"
+description = "SNACK: Seq Normalized Alignment Comparison Kit"
+requires-python = ">=3.8"
+authors = [
+    {name = "Nikita Kiselev", email = "nekitbrain@yandex.ru"}
+]
+
+[project.urls]
+Homepage = "https://github.com/kisnikser/snack"
+Repository = "https://github.com/kisnikser/snack"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["snack"]
+exclude = ["notebooks", "data"]
